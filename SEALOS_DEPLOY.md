@@ -35,6 +35,7 @@ To make Sealos match local functionality and local seed data, import the local S
 4. Start or redeploy the app.
 
 The startup script runs `prisma db push` and only seeds when `HerbCard` is empty, so an imported database will not be overwritten.
+The seed scripts read `DATABASE_URL`, so startup schema sync and startup seed target the same SQLite file.
 
 Expected local baseline:
 
