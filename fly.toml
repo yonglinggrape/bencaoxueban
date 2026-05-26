@@ -1,0 +1,16 @@
+app = "tcm-app"
+
+[build]
+
+[http_service]
+  internal_port = 3000
+  force_https = false
+
+[mounts]
+  source = "sqlite_data"
+  destination = "/app/prisma"
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1

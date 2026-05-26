@@ -1,0 +1,344 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String?
+  level         Int       @default(1)
+  exp           Int       @default(0)
+  points        Int       @default(0)
+  streak        Int       @default(0)
+  lastStudyAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts          Account[]
+  sessions          Session[]
+  answerRecords     AnswerRecord[]
+  learningPlans     LearningPlan[]
+  userKnowledges    UserKnowledge[]
+  userHerbs         UserHerb[]
+  userAchievements  UserAchievement[]
+  chatSessions      ChatSession[]
+  pointRecords      PointRecord[]
+  userDailyTasks    UserDailyTask[]
+  flashcardProgress FlashcardProgress[]
+  savedDiagnosis    SavedDiagnosis?
+  herbReminders     HerbReminder[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model KnowledgeDomain {
+  id          String  @id @default(cuid())
+  name        String  @unique
+  slug        String  @unique
+  description String?
+  icon        String?
+  sortOrder   Int     @default(0)
+  topics      Topic[]
+  questions   Question[]
+}
+
+model Topic {
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+  domainId    String
+  difficulty  Int     @default(1)
+  domain      KnowledgeDomain @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  questions   Question[]
+  herbCards   HerbCard[]
+
+  @@unique([name, domainId])
+}
+
+model Question {
+  id                   String   @id @default(cuid())
+  content              String
+  questionType         String   @default("single_choice")
+  options              String
+  correctAnswer        String
+  explanation          String?
+  domainId             String
+  topicId              String?
+  difficulty           String   @default("medium")
+  isAiGenerated        Boolean  @default(false)
+  sourceQuestionId     String?
+  generatedForCategory String?
+  createdAt            DateTime @default(now())
+
+  domain           KnowledgeDomain @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  topic            Topic?          @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  sourceQuestion   Question?       @relation("QuestionSource", fields: [sourceQuestionId], references: [id], onDelete: SetNull)
+  derivedQuestions Question[]      @relation("QuestionSource")
+  answerRecords    AnswerRecord[]
+}
+
+model AnswerRecord {
+  id          String   @id @default(cuid())
+  userId      String
+  questionId  String
+  userAnswer  String
+  isCorrect   Boolean
+  timeSpent   Int?
+  domainId    String?
+  topicId     String?
+  resolved    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+}
+
+model LearningPlan {
+  id          String    @id @default(cuid())
+  userId      String
+  title       String
+  description String?
+  startDate   String
+  endDate     String
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+
+  user  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tasks PlanTask[]
+}
+
+model PlanTask {
+  id            String   @id @default(cuid())
+  planId        String
+  title         String
+  description   String?
+  domainId      String?
+  topicId       String?
+  category      String?
+  taskType      String   @default("study")
+  scheduledDate String
+  isCompleted   Boolean  @default(false)
+  completedAt   DateTime?
+  sortOrder     Int      @default(0)
+
+  plan LearningPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+}
+
+model UserKnowledge {
+  id        String   @id @default(cuid())
+  userId    String
+  domainId  String
+  topicId   String?
+  mastery   Float    @default(0)
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, domainId, topicId])
+}
+
+model HerbCard {
+  id           String  @id @default(cuid())
+  name         String  @unique
+  latinName    String?
+  category     String
+  rarity       String  @default("常见")
+  image        String?
+  description  String?
+  properties   String?
+  effects      String?
+  usage        String?
+  mnemonic     String?
+  topicId      String?
+  masteryLevel String? // "master" | "familiar" | "understand"
+  topic        Topic?  @relation(fields: [topicId], references: [id], onDelete: SetNull)
+
+  userHerbs UserHerb[]
+  reminders  HerbReminder[]
+}
+
+model UserHerb {
+  id                String    @id @default(cuid())
+  userId            String
+  herbId            String
+  timesEncountered  Int       @default(1)
+  collectedAt       DateTime  @default(now())
+  mastered          Boolean   @default(false)
+  masteredAt        DateTime?
+
+  user User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  herb HerbCard @relation(fields: [herbId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, herbId])
+}
+
+model HerbReminder {
+  id           String   @id @default(cuid())
+  userId       String
+  herbId       String
+  masteredAt   DateTime @default(now())
+  nextReviewAt DateTime
+  intervalDays Int      @default(7)
+  reviewed     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  user User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  herb HerbCard @relation(fields: [herbId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, herbId])
+}
+
+model PointRecord {
+  id        String   @id @default(cuid())
+  userId    String
+  amount    Int
+  reason    String?
+  source    String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Achievement {
+  id           String @id @default(cuid())
+  name         String @unique
+  description  String?
+  icon         String?
+  category     String?
+  requirement  String?
+  rewardExp    Int    @default(0)
+  rewardPoints Int    @default(0)
+
+  userAchievements UserAchievement[]
+}
+
+model UserAchievement {
+  id            String   @id @default(cuid())
+  userId        String
+  achievementId String
+  unlockedAt    DateTime @default(now())
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, achievementId])
+}
+
+model ChatSession {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String   @default("学习对话")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages ChatMessage[]
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  sessionId String
+  role      String
+  content   String
+  createdAt DateTime @default(now())
+
+  session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+model DailyTask {
+  id           String @id @default(cuid())
+  title        String @unique
+  description  String?
+  taskType     String
+  requirement  String?
+  rewardExp    Int    @default(0)
+  rewardPoints Int    @default(0)
+
+  userDailyTasks UserDailyTask[]
+}
+
+model UserDailyTask {
+  id          String   @id @default(cuid())
+  userId      String
+  dailyTaskId String
+  date        String
+  isCompleted Boolean  @default(false)
+  completedAt DateTime?
+  progress    Int      @default(0)
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dailyTask DailyTask @relation(fields: [dailyTaskId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dailyTaskId, date])
+}
+
+model FlashcardProgress {
+  id             String    @id @default(cuid())
+  userId         String
+  cardId         String
+  box            Int       @default(0)
+  dueAt          DateTime  @default(now())
+  reviews        Int       @default(0)
+  lastReviewedAt DateTime?
+  lastRating     String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, cardId])
+}
+
+model SavedDiagnosis {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  weakCategories    String
+  weakTopics        String
+  overallAssessment String
+  suggestions       String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}

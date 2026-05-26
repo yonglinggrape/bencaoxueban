@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: tcm-app
+    env: docker
+    region: singapore
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /
+    envVars:
+      - key: DATABASE_URL
+        value: file:/app/prisma/dev.db
+      - key: AUTH_SECRET
+        generateValue: true
+      - key: AUTH_TRUST_HOST
+        value: "true"
+      - key: DEEPSEEK_API_KEY
+        sync: false
+    disk:
+      name: sqlite-data
+      mountPath: /app/prisma
+      sizeGB: 1
