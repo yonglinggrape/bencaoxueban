@@ -16,7 +16,7 @@ RUN npx prisma generate
 RUN npm run build
 
 # Startup script: push schema + start app
-RUN echo '#!/bin/sh\nnpx prisma db push --skip-generate\nnpm start' > /app/start.sh \
+RUN echo '#!/bin/sh\nmkdir -p /app/data\nnpx prisma db push --skip-generate\nnpm start' > /app/start.sh \
     && chmod +x /app/start.sh
 
 EXPOSE 3000
