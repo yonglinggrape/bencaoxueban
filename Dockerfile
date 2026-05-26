@@ -15,8 +15,8 @@ COPY . .
 RUN npx prisma generate
 RUN npm run build
 
-# Startup script: push schema + start app
-RUN echo '#!/bin/sh\nmkdir -p /app/data\nnpx prisma db push\nnpm start' > /app/start.sh \
+# Startup script: push schema, seed if empty, start app
+RUN echo '#!/bin/sh\nset -e\nmkdir -p /app/data\nnpx prisma db push\nif [ ! -f /app/data/.seeded ]; then npx prisma db seed && touch /app/data/.seeded; fi\nnpm start' > /app/start.sh \
     && chmod +x /app/start.sh
 
 EXPOSE 3000
