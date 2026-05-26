@@ -21,6 +21,17 @@ interface SimilarQuestion { id: string; content: string; options: { label: strin
 const DOMAIN_NAMES: Record<string, string> = { HERBOLOGY: "中药学" }
 const DIFFICULTY_LABELS: Record<string, string> = { easy: "简单", medium: "中等", hard: "困难" }
 
+function normalizeDiagnosis(data: Partial<DiagnosisResult> | null | undefined): DiagnosisResult {
+  return {
+    weakCategories: Array.isArray(data?.weakCategories) ? data.weakCategories : [],
+    weakTopics: Array.isArray(data?.weakTopics) ? data.weakTopics : [],
+    overallAssessment: typeof data?.overallAssessment === "string" && data.overallAssessment
+      ? data.overallAssessment
+      : "诊断暂不可用，请稍后在学习计划中重试。",
+    suggestions: Array.isArray(data?.suggestions) ? data.suggestions : [],
+  }
+}
+
 export default function QuizPage() {
   const { data: session } = useSession()
   const userId = (session?.user as Record<string, unknown>)?.id as string || ""
@@ -88,7 +99,7 @@ export default function QuizPage() {
   async function submitAnswers() {
     setLoading(true)
     let correctCount = 0
-    let herbsCollected: string[] = []
+    const herbsCollected: string[] = []
     let leveledUp = false
     let allSimilarQuestions: SimilarQuestion[] = []
 
@@ -114,13 +125,32 @@ export default function QuizPage() {
       setSimilarQuestions(allSimilarQuestions)
 
       // Get diagnosis
-      const diagRes = await fetch("/api/ai/diagnose", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId }),
-      })
-      const diagData = await diagRes.json()
+      let diagData: DiagnosisResult
+      try {
+        const diagRes = await fetch("/api/ai/diagnose", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId }),
+        })
+        diagData = normalizeDiagnosis(diagRes.ok ? await diagRes.json() : null)
+      } catch {
+        diagData = normalizeDiagnosis(null)
+      }
       setDiagnosis(diagData)
+
+      if (mode === "mistake") {
+        const resolvedQuestionIds = questions
+          .filter(q => answers[q.id] === q.correctAnswer)
+          .map(q => q.id)
+        if (resolvedQuestionIds.length > 0) {
+          fetch("/api/mistakes/resolve-by-question", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userId, questionIds: resolvedQuestionIds }),
+          }).catch(() => { /* non-critical */ })
+        }
+      }
+
       // Auto-save diagnosis
       fetch("/api/diagnosis/save", {
         method: "POST",
@@ -379,6 +409,8 @@ export default function QuizPage() {
 function DiagnosisResultView({ diagnosis, userId, onRetry, similarQuestions }: { diagnosis: DiagnosisResult; userId: string; onRetry: () => void; similarQuestions: SimilarQuestion[] }) {
   const [plan, setPlan] = useState<{ days: { date: string; tasks: { title: string; description: string; taskType: string }[] }[] } | null>(null)
   const [planLoading, setPlanLoading] = useState(false)
+  const weakCategories = Array.isArray(diagnosis.weakCategories) ? diagnosis.weakCategories : []
+  const suggestions = Array.isArray(diagnosis.suggestions) ? diagnosis.suggestions : []
 
   async function generatePlan() {
     setPlanLoading(true)
@@ -415,7 +447,10 @@ function DiagnosisResultView({ diagnosis, userId, onRetry, similarQuestions }: {
       <Card>
         <CardHeader><CardTitle>中药类别掌握度</CardTitle></CardHeader>
         <CardContent className="space-y-4">
-          {diagnosis.weakCategories.map(d => (
+          {weakCategories.length === 0 && (
+            <p className="text-sm text-muted-foreground">暂无可用的分类诊断数据。</p>
+          )}
+          {weakCategories.map(d => (
             <div key={d.category}>
               <div className="flex justify-between text-sm mb-1"><span>{d.category}</span><span>{Math.round((1 - d.errorRate) * 100)}%</span></div>
               <div className="h-4 bg-muted rounded-full overflow-hidden">
@@ -432,10 +467,10 @@ function DiagnosisResultView({ diagnosis, userId, onRetry, similarQuestions }: {
         <CardHeader><CardTitle>AI 诊断</CardTitle></CardHeader>
         <CardContent>
           <p className="text-muted-foreground mb-4">{diagnosis.overallAssessment}</p>
-          {diagnosis.suggestions.length > 0 && (
+          {suggestions.length > 0 && (
             <div className="space-y-2">
               <h4 className="font-medium">学习建议：</h4>
-              {diagnosis.suggestions.map((s, i) => (
+              {suggestions.map((s, i) => (
                 <div key={i} className="flex items-start gap-2 text-sm">
                   <ArrowRight className="h-4 w-4 mt-0.5 text-green-500 flex-shrink-0" />
                   <span>{s}</span>
