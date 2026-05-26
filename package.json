@@ -13,8 +13,6 @@
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^3.0.79",
-    "@anthropic-ai/sdk": "^0.98.0",
     "@auth/prisma-adapter": "^2.11.2",
     "@base-ui/react": "^1.5.0",
     "@prisma/adapter-better-sqlite3": "^7.8.0",

@@ -1,17 +1,3 @@
-import { Anthropic } from "@anthropic-ai/sdk"
-
-function createAnthropicClient(): Anthropic | null {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey || apiKey === "sk-ant-placeholder") {
-    console.warn("[AI] No valid ANTHROPIC_API_KEY — using mock data")
-    return null
-  }
-  return new Anthropic({ apiKey })
-}
-
-export const anthropic = createAnthropicClient()
-export const hasAnthropicKey = () => anthropic !== null
-
 // DeepSeek (OpenAI-compatible)
 const DEEPSEEK_BASE = "https://api.deepseek.com/v1"
 
