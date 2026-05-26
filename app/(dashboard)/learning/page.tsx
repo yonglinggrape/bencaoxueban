@@ -95,7 +95,7 @@ export default function LearningPage() {
             <h2 className="text-lg font-semibold mb-2">还没有学习计划</h2>
             <p className="text-muted-foreground mb-6">先去"智能练习"完成初始评测，AI 将为你生成个性化学习计划。</p>
             <div className="flex gap-4 justify-center">
-              <Button asChild className="bg-amber-600 hover:bg-amber-700"><a href="/quiz">去答题评测</a></Button>
+              <Button className="bg-amber-600 hover:bg-amber-700" onClick={() => router.push("/quiz")}>去答题评测</Button>
               <Button onClick={generatePlan} disabled={generating} variant="outline"><Brain className="h-4 w-4 mr-2" />{generating ? "生成中..." : "直接生成计划"}</Button>
             </div>
           </CardContent>

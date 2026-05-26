@@ -52,8 +52,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
         <ScrollArea className="flex-1 py-2">
           {NAV_ITEMS.map(item => (
-            <Tooltip key={item.href} delayDuration={0}>
-              <TooltipTrigger asChild>
+            <Tooltip key={item.href}>
+              <TooltipTrigger>
                 <Link href={item.href} className={cn(
                   "flex items-center gap-3 px-4 py-2.5 mx-2 rounded-lg text-sm transition-colors",
                   pathname === item.href ? "bg-green-700/50 text-green-100" : "text-green-200/70 hover:text-green-100 hover:bg-green-800/30"
@@ -98,10 +98,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </Button>
           <div className="flex-1" />
           <Badge variant="secondary" className="gap-1">
-            <Zap className="h-3 w-3" /> Lv.{user?.level || 1}
+            <Zap className="h-3 w-3" /> Lv.{(user?.level as number) || 1}
           </Badge>
           <Badge variant="outline" className="gap-1">
-            <Gem className="h-3 w-3" /> {user?.points || 0}
+            <Gem className="h-3 w-3" /> {(user?.points as number) || 0}
           </Badge>
           <Avatar className="h-8 w-8">
             <AvatarFallback className="bg-green-200 text-green-800 text-xs">

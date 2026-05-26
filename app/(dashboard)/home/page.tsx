@@ -34,10 +34,10 @@ export default function DashboardHome() {
             <AvatarFallback className="bg-green-200 text-green-800 text-2xl">{(user?.name as string)?.slice(0, 2) || "本"}</AvatarFallback>
           </Avatar>
           <div className="flex-1">
-            <h1 className="text-2xl font-bold">{user?.name || "本草学子"}，学习加油</h1>
+            <h1 className="text-2xl font-bold">{(user?.name as string) || "本草学子"}，学习加油</h1>
             <div className="flex items-center gap-3 mt-2 flex-wrap">
               <Badge className="gap-1 bg-green-600"><Zap className="h-3 w-3" />Lv.{levelInfo.level}</Badge>
-              <Badge variant="secondary" className="gap-1"><Gem className="h-3 w-3" />{user?.points || 0} 积分</Badge>
+              <Badge variant="secondary" className="gap-1"><Gem className="h-3 w-3" />{(user?.points as number) || 0} 积分</Badge>
               <Badge variant="outline" className="gap-1"><Leaf className="h-3 w-3" />{stats.herbCards || 0} 药卡</Badge>
               <Badge variant="outline" className="gap-1"><Flame className="h-3 w-3" />{stats.streak || 0} 天</Badge>
             </div>
