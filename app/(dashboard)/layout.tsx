@@ -16,7 +16,7 @@ import {
 
 const NAV_ITEMS = [
   { href: "/home", label: "学习台", icon: LayoutDashboard },
-  { href: "/collection", label: "本草图鉴", icon: Leaf },
+  { href: "/collection", label: "本草药典", icon: Leaf },
   { href: "/learning", label: "学习计划", icon: BookOpen },
   { href: "/quiz", label: "智能练习", icon: PenLine },
   { href: "/leaderboard", label: "学伴榜", icon: Trophy },

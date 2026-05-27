@@ -54,7 +54,7 @@ export default function DashboardHome() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
           { href: "/quiz", icon: PenLine, label: "开始答题", color: "bg-blue-500" },
-          { href: "/collection", icon: Leaf, label: "药卡图鉴", color: "bg-emerald-500" },
+          { href: "/collection", icon: Leaf, label: "本草药典", color: "bg-emerald-500" },
           { href: "/learning", icon: BookOpen, label: "学习计划", color: "bg-green-500" },
           { href: "/tutor", icon: MessageCircle, label: "AI 导师", color: "bg-purple-500" },
         ].map(item => (

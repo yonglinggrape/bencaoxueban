@@ -125,7 +125,7 @@ export default function CollectionPage() {
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold flex items-center gap-2"><BookOpen className="h-6 w-6 text-green-500" />本草图鉴</h1>
+        <h1 className="text-2xl font-bold flex items-center gap-2"><BookOpen className="h-6 w-6 text-green-500" />本草药典</h1>
         {reminderDue > 0 && (
           <Badge className="bg-amber-100 text-amber-700 gap-1">
             <BellRing className="h-3 w-3" />{reminderDue} 味药材待复习
@@ -218,7 +218,7 @@ export default function CollectionPage() {
                     <CheckCircle2 className="h-4 w-4 mr-1" />
                     {userMastered.has(selected.id) ? "取消掌握" : "标记为已掌握"}
                   </Button>
-                  <button onClick={() => setSelected(null)} className="text-sm text-green-600 hover:underline">← 返回图鉴</button>
+                  <button onClick={() => setSelected(null)} className="text-sm text-green-600 hover:underline">← 返回药典</button>
                 </div>
               </div>
 
