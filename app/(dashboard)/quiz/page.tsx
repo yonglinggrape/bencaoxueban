@@ -1,22 +1,56 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useSession } from "next-auth/react"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Label } from "@/components/ui/label"
+import { Input } from "@/components/ui/input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { toast } from "sonner"
-import { Brain, CheckCircle, XCircle, ArrowRight, RefreshCw, Leaf, BookOpen, Shuffle, Target, Sparkles, BookMarked } from "lucide-react"
+import { ArrowRight, BookMarked, BookOpen, Brain, CheckCircle, ChevronDown, ChevronUp, Leaf, RefreshCw, Search, Shuffle, Sparkles, Target } from "lucide-react"
 import { ChapterSelector, type ChapterInfo } from "@/components/tcm/chapter-selector"
 import { SimilarQuestionPanel } from "@/components/quiz/similar-question-panel"
 import { MistakeNotebook } from "@/components/quiz/mistake-notebook"
 
-interface Question { id: string; domainId: string; topicId: string; content: string; questionType: string; options: { label: string; text: string }[]; correctAnswer: string; explanation: string; difficulty: string }
-interface DiagnosisResult { weakCategories: { category: string; errorRate: number; totalQuestions: number }[]; weakTopics: { topicId: string; topicName: string; category: string; errorRate: number; totalQuestions: number }[]; overallAssessment: string; suggestions: string[] }
-interface SimilarQuestion { id: string; content: string; options: { label: string; text: string }[]; correctAnswer: string; explanation: string; difficulty: string; generatedForCategory: string }
+interface Question {
+  id: string
+  domainId: string
+  topicId: string
+  topicName?: string
+  content: string
+  questionType: string
+  options: { label: string; text: string }[]
+  correctAnswer: string
+  explanation: string | null
+  difficulty: string
+  isAiGenerated?: boolean
+  createdAt?: string
+}
+
+interface DiagnosisResult {
+  weakCategories: { category: string; errorRate: number; totalQuestions: number }[]
+  weakTopics: { topicId: string; topicName: string; category: string; errorRate: number; totalQuestions: number }[]
+  overallAssessment: string
+  suggestions: string[]
+}
+
+interface SimilarQuestion {
+  id: string
+  content: string
+  options: { label: string; text: string }[]
+  correctAnswer: string
+  explanation: string
+  difficulty: string
+  generatedForCategory: string
+}
+
+type Phase = "mode" | "config" | "quiz" | "result" | "questionBank"
+type QuizMode = "chapter" | "random" | "mistake"
+type QuestionSource = "bank" | "ai"
 
 const DOMAIN_NAMES: Record<string, string> = { HERBOLOGY: "中药学" }
 const DIFFICULTY_LABELS: Record<string, string> = { easy: "简单", medium: "中等", hard: "困难" }
@@ -36,64 +70,110 @@ export default function QuizPage() {
   const { data: session } = useSession()
   const userId = (session?.user as Record<string, unknown>)?.id as string || ""
 
-  // Phase state
-  const [phase, setPhase] = useState<"mode" | "config" | "quiz" | "result" | "notebook">("mode")
-  const [mode, setMode] = useState<"chapter" | "random" | "mistake">("chapter")
-
-  // Config state
+  const [phase, setPhase] = useState<Phase>("mode")
+  const [mode, setMode] = useState<QuizMode>("chapter")
+  const [questionSource, setQuestionSource] = useState<QuestionSource>("bank")
   const [chapters, setChapters] = useState<ChapterInfo[]>([])
   const [selectedChapters, setSelectedChapters] = useState<string[]>([])
   const [questionCount, setQuestionCount] = useState(10)
-  // Quiz state (existing)
+
   const [questions, setQuestions] = useState<Question[]>([])
   const [currentIdx, setCurrentIdx] = useState(0)
   const [answers, setAnswers] = useState<Record<string, string>>({})
-  const [submitted, setSubmitted] = useState(false)
   const [loading, setLoading] = useState(false)
   const [diagnosis, setDiagnosis] = useState<DiagnosisResult | null>(null)
   const [similarQuestions, setSimilarQuestions] = useState<SimilarQuestion[]>([])
+  const [pendingMistakeQuestionIds, setPendingMistakeQuestionIds] = useState<string[]>([])
 
   useEffect(() => {
     fetch("/api/collection/chapters").then(r => r.json()).then(d => setChapters(d.chapters || []))
   }, [])
 
-  function goToConfig(m: "chapter" | "random" | "mistake") {
-    setMode(m)
+  function goToConfig(nextMode: QuizMode) {
+    setMode(nextMode)
     setPhase("config")
+    setQuestionSource("bank")
     setSelectedChapters([])
+  }
+
+  async function loadAiChapterQuestions() {
+    if (selectedChapters.length === 0) {
+      toast.error("请先选择章节")
+      return []
+    }
+
+    const base = Math.floor(questionCount / selectedChapters.length)
+    const remainder = questionCount % selectedChapters.length
+    const generated: Question[] = []
+
+    for (let i = 0; i < selectedChapters.length; i++) {
+      const topicId = selectedChapters[i]
+      const chapter = chapters.find(ch => ch.topicId === topicId)
+      const count = base + (i < remainder ? 1 : 0)
+      if (count <= 0) continue
+
+      const res = await fetch("/api/ai/question", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          topicId,
+          topicName: chapter?.name,
+          count,
+          saveToDb: true,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "AI 出题失败")
+      generated.push(...(data.questions || []))
+    }
+
+    return generated
   }
 
   async function startQuiz() {
     setLoading(true)
-    const params = new URLSearchParams()
-    params.set("count", String(questionCount))
-
-    if (mode === "chapter" && selectedChapters.length > 0) {
-      params.set("mode", "chapter")
-      params.set("topicIds", selectedChapters.join(","))
-    } else if (mode === "mistake") {
-      params.set("mode", "mistake")
-      params.set("userId", userId)
-    } else {
-      params.set("mode", "random")
-    }
-
     try {
-      const res = await fetch(`/api/quiz/questions?${params.toString()}`)
-      const data = await res.json()
-      if (data.questions.length === 0) {
+      let loadedQuestions: Question[] = []
+
+      if (mode === "chapter" && questionSource === "ai") {
+        loadedQuestions = await loadAiChapterQuestions()
+      } else {
+        const params = new URLSearchParams()
+        params.set("count", String(questionCount))
+
+        if (mode === "chapter" && selectedChapters.length > 0) {
+          params.set("mode", "chapter")
+          params.set("topicIds", selectedChapters.join(","))
+        } else if (mode === "mistake") {
+          params.set("mode", "mistake")
+          params.set("userId", userId)
+        } else {
+          params.set("mode", "random")
+        }
+
+        const res = await fetch(`/api/quiz/questions?${params.toString()}`)
+        const data = await res.json()
+        loadedQuestions = data.questions || []
+      }
+
+      if (loadedQuestions.length === 0) {
         toast.error(mode === "mistake" ? "暂无错题记录，先去练习吧！" : "暂无题目")
-        setLoading(false)
         return
       }
-      setQuestions(data.questions || [])
+
+      setQuestions(loadedQuestions)
       setCurrentIdx(0)
       setAnswers({})
-      setSubmitted(false)
       setDiagnosis(null)
+      setSimilarQuestions([])
+      setPendingMistakeQuestionIds([])
       setPhase("quiz")
-    } catch { toast.error("加载题目失败") }
-    finally { setLoading(false) }
+    } catch (e) {
+      console.error("[Quiz start]", e)
+      toast.error(questionSource === "ai" ? "AI 出题失败，请检查 DeepSeek 配置" : "加载题目失败")
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function submitAnswers() {
@@ -123,8 +203,11 @@ export default function QuizPage() {
       }
 
       setSimilarQuestions(allSimilarQuestions)
+      setPendingMistakeQuestionIds(mode === "mistake"
+        ? questions.filter(q => answers[q.id] === q.correctAnswer).map(q => q.id)
+        : []
+      )
 
-      // Get diagnosis
       let diagData: DiagnosisResult
       try {
         const diagRes = await fetch("/api/ai/diagnose", {
@@ -138,126 +221,71 @@ export default function QuizPage() {
       }
       setDiagnosis(diagData)
 
-      if (mode === "mistake") {
-        const resolvedQuestionIds = questions
-          .filter(q => answers[q.id] === q.correctAnswer)
-          .map(q => q.id)
-        if (resolvedQuestionIds.length > 0) {
-          fetch("/api/mistakes/resolve-by-question", {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ userId, questionIds: resolvedQuestionIds }),
-          }).catch(() => { /* non-critical */ })
-        }
-      }
-
-      // Auto-save diagnosis
       fetch("/api/diagnosis/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId, ...diagData }),
       }).catch(() => { /* non-critical */ })
-      setPhase("result")
 
+      setPhase("result")
       toast.success(`评测完成！正确 ${correctCount}/${questions.length}`, { description: `获得 ${correctCount * 30} 经验` })
-      if (leveledUp) toast.success("升级了！", { icon: "⚡" })
+      if (leveledUp) toast.success("升级了！")
       for (const h of herbsCollected) toast("获得药卡", { description: `${h}`, icon: <Leaf className="h-4 w-4 text-green-500" /> })
       if (allSimilarQuestions.length > 0) toast("AI 已为你生成同类药材巩固练习", { icon: <Sparkles className="h-4 w-4 text-amber-500" /> })
-    } catch { toast.error("提交失败") }
-    finally { setLoading(false) }
+    } catch (e) {
+      console.error("[Quiz submit]", e)
+      toast.error("提交失败")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function clearPendingMistakes() {
+    if (pendingMistakeQuestionIds.length === 0) return
+    try {
+      const res = await fetch("/api/mistakes/resolve-by-question", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, questionIds: pendingMistakeQuestionIds }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "清除失败")
+      toast.success(`已消除 ${data.resolved || pendingMistakeQuestionIds.length} 条错题记录`)
+      setPendingMistakeQuestionIds([])
+    } catch {
+      toast.error("消除错题失败")
+    }
   }
 
   function resetQuiz() {
     setPhase("mode")
     setQuestions([])
     setAnswers({})
-    setSubmitted(false)
     setDiagnosis(null)
+    setSimilarQuestions([])
+    setPendingMistakeQuestionIds([])
   }
 
-  // ====== Mode Selection View ======
   if (phase === "mode") {
     return (
       <div className="max-w-2xl mx-auto space-y-6">
         <h1 className="text-2xl font-bold flex items-center gap-2"><Brain className="h-6 w-6 text-green-500" />智能练习</h1>
-        <p className="text-muted-foreground text-sm">选择练习模式，开始你的中药学进阶之旅</p>
+        <p className="text-muted-foreground text-sm">选择练习方式，按章节、随机题库或习题集进行学习。</p>
 
         <div className="grid gap-4">
-          <Card
-            className="cursor-pointer hover:border-green-400 hover:shadow-md transition-all"
-            onClick={() => goToConfig("chapter")}
-          >
-            <CardContent className="pt-6 flex items-start gap-4">
-              <div className="flex-shrink-0 h-12 w-12 rounded-lg bg-green-100 dark:bg-green-900 flex items-center justify-center">
-                <BookOpen className="h-6 w-6 text-green-600" />
-              </div>
-              <div className="flex-1">
-                <h3 className="font-semibold text-lg">章节练习</h3>
-                <p className="text-sm text-muted-foreground">按教材章节针对性训练，选择你想练习的章节，系统从该章节抽取题目</p>
-              </div>
-              <ArrowRight className="h-5 w-5 text-muted-foreground flex-shrink-0 mt-3" />
-            </CardContent>
-          </Card>
-
-          <Card
-            className="cursor-pointer hover:border-blue-400 hover:shadow-md transition-all"
-            onClick={() => goToConfig("random")}
-          >
-            <CardContent className="pt-6 flex items-start gap-4">
-              <div className="flex-shrink-0 h-12 w-12 rounded-lg bg-blue-100 dark:bg-blue-900 flex items-center justify-center">
-                <Shuffle className="h-6 w-6 text-blue-600" />
-              </div>
-              <div className="flex-1">
-                <h3 className="font-semibold text-lg">随机练习</h3>
-                <p className="text-sm text-muted-foreground">从题库中随机抽取题目，全面检验各章节掌握情况，模拟真实考试场景</p>
-              </div>
-              <ArrowRight className="h-5 w-5 text-muted-foreground flex-shrink-0 mt-3" />
-            </CardContent>
-          </Card>
-
-          <Card
-            className="cursor-pointer hover:border-amber-400 hover:shadow-md transition-all"
-            onClick={() => goToConfig("mistake")}
-          >
-            <CardContent className="pt-6 flex items-start gap-4">
-              <div className="flex-shrink-0 h-12 w-12 rounded-lg bg-amber-100 dark:bg-amber-900 flex items-center justify-center">
-                <Target className="h-6 w-6 text-amber-600" />
-              </div>
-              <div className="flex-1">
-                <h3 className="font-semibold text-lg">错题复习</h3>
-                <p className="text-sm text-muted-foreground">针对之前答错的题目进行针对性复习，巩固薄弱知识点，避免重复犯错</p>
-              </div>
-              <ArrowRight className="h-5 w-5 text-muted-foreground flex-shrink-0 mt-3" />
-            </CardContent>
-          </Card>
-
-          {/* 错题本入口 */}
-          <Card
-            className="cursor-pointer hover:border-purple-400 hover:shadow-md transition-all"
-            onClick={() => setPhase("notebook")}
-          >
-            <CardContent className="pt-6 flex items-start gap-4">
-              <div className="flex-shrink-0 h-12 w-12 rounded-lg bg-purple-100 dark:bg-purple-900 flex items-center justify-center">
-                <BookMarked className="h-6 w-6 text-purple-600" />
-              </div>
-              <div className="flex-1">
-                <h3 className="font-semibold text-lg">错题本</h3>
-                <p className="text-sm text-muted-foreground">查看和管理所有错题，按章节分类，重做或标记为已掌握</p>
-              </div>
-              <ArrowRight className="h-5 w-5 text-muted-foreground flex-shrink-0 mt-3" />
-            </CardContent>
-          </Card>
+          <ModeCard icon={BookOpen} title="章节练习" desc="按教材章节练习，可选择题库出题或 AI 智能出题。" color="bg-green-100 text-green-700" onClick={() => goToConfig("chapter")} />
+          <ModeCard icon={Shuffle} title="随机练习" desc="从题库中随机抽题，全面检测各章节掌握情况。" color="bg-blue-100 text-blue-700" onClick={() => goToConfig("random")} />
+          <ModeCard icon={BookMarked} title="习题集" desc="查看所有题目和错题本，题目默认收起，点击后展开详情。" color="bg-purple-100 text-purple-700" onClick={() => setPhase("questionBank")} />
         </div>
       </div>
     )
   }
 
-  // ====== Configuration View ======
   if (phase === "config") {
-    const modeLabels: Record<string, { title: string; desc: string }> = {
-      chapter: { title: "章节练习", desc: "选择要练习的章节和题目数量" },
-      random: { title: "随机练习", desc: "设置题目数量" },
-      mistake: { title: "错题复习", desc: "从你之前答错的题目中抽取" },
+    const modeLabels: Record<QuizMode, { title: string; desc: string }> = {
+      chapter: { title: "章节练习", desc: "选择章节、题目数量和出题方式。" },
+      random: { title: "随机练习", desc: "设置题目数量，系统从题库随机抽题。" },
+      mistake: { title: "错题复习", desc: "从你之前答错且未消除的题目中抽取。" },
     }
 
     return (
@@ -268,37 +296,34 @@ export default function QuizPage() {
         </div>
         <p className="text-sm text-muted-foreground -mt-4">{modeLabels[mode].desc}</p>
 
-        {/* Chapter selection for chapter mode */}
         {mode === "chapter" && (
-          <Card>
-            <CardHeader><CardTitle className="text-base">选择章节</CardTitle></CardHeader>
-            <CardContent>
-              <ChapterSelector
-                chapters={chapters.filter(c => c.topicId)}
-                selected={selectedChapters}
-                onChange={setSelectedChapters}
-                multiSelect
-              />
-              {selectedChapters.length === 0 && (
-                <p className="text-sm text-muted-foreground mt-3">未选择则从所有章节随机出题</p>
-              )}
-            </CardContent>
-          </Card>
+          <>
+            <Card>
+              <CardHeader><CardTitle className="text-base">选择章节</CardTitle></CardHeader>
+              <CardContent>
+                <ChapterSelector chapters={chapters.filter(c => c.topicId)} selected={selectedChapters} onChange={setSelectedChapters} multiSelect />
+                {selectedChapters.length === 0 && <p className="text-sm text-muted-foreground mt-3">题库出题未选章节时会从所有章节随机出题；AI 智能出题必须选择章节。</p>}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader><CardTitle className="text-base">出题方式</CardTitle></CardHeader>
+              <CardContent className="grid grid-cols-2 gap-2">
+                <Button variant={questionSource === "bank" ? "default" : "outline"} onClick={() => setQuestionSource("bank")} className={questionSource === "bank" ? "bg-green-600 hover:bg-green-700" : ""}>题库出题</Button>
+                <Button variant={questionSource === "ai" ? "default" : "outline"} onClick={() => setQuestionSource("ai")} className={questionSource === "ai" ? "bg-green-600 hover:bg-green-700" : ""}>
+                  <Sparkles className="h-4 w-4 mr-2" />AI 智能出题
+                </Button>
+              </CardContent>
+            </Card>
+          </>
         )}
 
-        {/* Question count */}
         <Card>
           <CardHeader><CardTitle className="text-base">题目数量</CardTitle></CardHeader>
           <CardContent>
             <div className="flex gap-2">
               {[5, 10, 15, 20].map(n => (
-                <Button
-                  key={n}
-                  variant={questionCount === n ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setQuestionCount(n)}
-                  className={questionCount === n ? "bg-green-600 hover:bg-green-700" : ""}
-                >
+                <Button key={n} variant={questionCount === n ? "default" : "outline"} size="sm" onClick={() => setQuestionCount(n)} className={questionCount === n ? "bg-green-600 hover:bg-green-700" : ""}>
                   {n} 题
                 </Button>
               ))}
@@ -307,27 +332,24 @@ export default function QuizPage() {
         </Card>
 
         <Button onClick={startQuiz} disabled={loading} size="lg" className="w-full bg-green-600 hover:bg-green-700">
-          <Brain className="h-4 w-4 mr-2" />{loading ? "加载中..." : "开始练习"}
+          <Brain className="h-4 w-4 mr-2" />{loading ? (questionSource === "ai" ? "AI 出题中..." : "加载中...") : "开始练习"}
         </Button>
       </div>
     )
   }
 
-  // ====== Quiz View (existing, adapted) ======
   const q = questions[currentIdx]
   const isLast = currentIdx === questions.length - 1
 
   if (phase === "quiz") {
-    if (loading && questions.length === 0) return <div className="max-w-2xl mx-auto py-12"><Card><CardContent className="pt-6 text-center"><p className="text-muted-foreground">正在加载题目...</p></CardContent></Card></div>
-
-    if (!q) return <div className="max-w-2xl mx-auto py-12"><Card><CardContent className="pt-6 text-center"><p>暂无题目</p><Button onClick={resetQuiz} className="mt-4"><RefreshCw className="h-4 w-4 mr-2" />重新选择</Button></CardContent></Card></div>
-
-    const options = typeof q.options === "string" ? JSON.parse(q.options) : q.options
+    if (!q) {
+      return <EmptyState text="暂无题目" onBack={resetQuiz} />
+    }
 
     return (
       <div className="max-w-2xl mx-auto space-y-6">
         <div className="flex items-center justify-between">
-          <button onClick={() => setPhase("config")} className="text-sm text-muted-foreground hover:text-foreground">← 返回设置</button>
+          <button onClick={() => setPhase("config")} className="text-sm text-muted-foreground hover:text-foreground">← 返回配置</button>
           <Badge variant="secondary">{currentIdx + 1} / {questions.length}</Badge>
         </div>
         <Progress value={((currentIdx + 1) / questions.length) * 100} className="h-2" />
@@ -337,12 +359,13 @@ export default function QuizPage() {
             <CardTitle className="text-lg">{q.content}</CardTitle>
             <CardDescription>
               {DOMAIN_NAMES[q.domainId] || q.domainId} · {DIFFICULTY_LABELS[q.difficulty] || q.difficulty}
+              {q.isAiGenerated && <Badge variant="outline" className="ml-2">AI</Badge>}
             </CardDescription>
           </CardHeader>
           <CardContent>
             <RadioGroup value={answers[q.id] || ""} onValueChange={(v) => setAnswers(prev => ({ ...prev, [q.id]: v }))}>
               <div className="space-y-3">
-                {options.map((opt: { label: string; text: string }) => (
+                {q.options.map(opt => (
                   <label key={opt.label} className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${answers[q.id] === opt.label ? "border-green-500 bg-green-50 dark:bg-green-950" : "hover:bg-muted"}`}>
                     <RadioGroupItem value={opt.label} id={`${q.id}-${opt.label}`} />
                     <Label htmlFor={`${q.id}-${opt.label}`} className="flex-1 cursor-pointer">
@@ -359,7 +382,7 @@ export default function QuizPage() {
                   {loading ? "提交中..." : "提交评测"} <CheckCircle className="h-4 w-4 ml-2" />
                 </Button>
               ) : (
-                <Button onClick={() => setCurrentIdx(i => i + 1)} disabled={!answers[q.id]}><ArrowRight className="h-4 w-4 mr-2" />下一题</Button>
+                <Button onClick={() => setCurrentIdx(i => i + 1)} disabled={!answers[q.id]}>下一题 <ArrowRight className="h-4 w-4 ml-2" /></Button>
               )}
             </div>
           </CardContent>
@@ -368,45 +391,205 @@ export default function QuizPage() {
     )
   }
 
-  // ====== Notebook View ======
-  if (phase === "notebook") {
+  if (phase === "questionBank") {
     return (
-      <div className="max-w-3xl mx-auto space-y-6">
-        <div className="flex items-center gap-3">
-          <button onClick={resetQuiz} className="text-sm text-muted-foreground hover:text-foreground">← 返回</button>
-          <h1 className="text-2xl font-bold flex items-center gap-2"><BookMarked className="h-6 w-6 text-purple-500" />错题本</h1>
-        </div>
-        <p className="text-sm text-muted-foreground -mt-4">按章节查看错题，重做或标记为已掌握</p>
-        <MistakeNotebook
-          userId={userId}
-          onRedoQuestion={(questionId) => {
-            // Load a single question in quiz mode
-            setPhase("quiz")
-            setMode("mistake")
-            fetch(`/api/quiz/questions?mode=random&count=1`)
-              .then(r => r.json())
-              .then(d => {
-                // Actually we need to load this specific question, so use mistake mode with userId
-                setQuestions([]) // The mistake mode API will load it
-                // For single question redo, just load from mistake mode
-                startQuiz()
-              })
-              .catch(() => toast.error("加载题目失败"))
-          }}
-        />
-      </div>
+      <QuestionBankView
+        userId={userId}
+        chapters={chapters}
+        onBack={resetQuiz}
+        onStartMistakeReview={() => goToConfig("mistake")}
+      />
     )
   }
 
-  // ====== Result View ======
   if (phase === "result" && diagnosis) {
-    return <DiagnosisResultView diagnosis={diagnosis} userId={userId} onRetry={resetQuiz} similarQuestions={similarQuestions} />
+    return (
+      <DiagnosisResultView
+        diagnosis={diagnosis}
+        userId={userId}
+        onRetry={resetQuiz}
+        similarQuestions={similarQuestions}
+        pendingMistakeQuestionIds={pendingMistakeQuestionIds}
+        onClearMistakes={clearPendingMistakes}
+        onKeepMistakes={() => setPendingMistakeQuestionIds([])}
+      />
+    )
   }
 
   return null
 }
 
-function DiagnosisResultView({ diagnosis, userId, onRetry, similarQuestions }: { diagnosis: DiagnosisResult; userId: string; onRetry: () => void; similarQuestions: SimilarQuestion[] }) {
+function ModeCard({ icon: Icon, title, desc, color, onClick }: { icon: typeof BookOpen; title: string; desc: string; color: string; onClick: () => void }) {
+  return (
+    <Card className="cursor-pointer hover:border-green-400 hover:shadow-md transition-all" onClick={onClick}>
+      <CardContent className="pt-6 flex items-start gap-4">
+        <div className={`flex-shrink-0 h-12 w-12 rounded-lg flex items-center justify-center ${color}`}>
+          <Icon className="h-6 w-6" />
+        </div>
+        <div className="flex-1">
+          <h3 className="font-semibold text-lg">{title}</h3>
+          <p className="text-sm text-muted-foreground">{desc}</p>
+        </div>
+        <ArrowRight className="h-5 w-5 text-muted-foreground flex-shrink-0 mt-3" />
+      </CardContent>
+    </Card>
+  )
+}
+
+function EmptyState({ text, onBack }: { text: string; onBack: () => void }) {
+  return (
+    <div className="max-w-2xl mx-auto py-12">
+      <Card><CardContent className="pt-6 text-center"><p>{text}</p><Button onClick={onBack} className="mt-4"><RefreshCw className="h-4 w-4 mr-2" />重新选择</Button></CardContent></Card>
+    </div>
+  )
+}
+
+function QuestionBankView({ userId, chapters, onBack, onStartMistakeReview }: { userId: string; chapters: ChapterInfo[]; onBack: () => void; onStartMistakeReview: () => void }) {
+  const [tab, setTab] = useState<"all" | "mistakes">("all")
+  const [questions, setQuestions] = useState<Question[]>([])
+  const [topicId, setTopicId] = useState("all")
+  const [source, setSource] = useState("all")
+  const [search, setSearch] = useState("")
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
+  const [expandedQuestions, setExpandedQuestions] = useState<Record<string, boolean>>({})
+
+  useEffect(() => {
+    if (tab !== "all") return
+    const controller = new AbortController()
+    const params = new URLSearchParams({ topicId, source, search, limit: "1000" })
+    fetch(`/api/quiz/bank?${params.toString()}`, { signal: controller.signal })
+      .then(r => r.json())
+      .then(d => setQuestions(d.questions || []))
+      .catch(() => {
+        if (!controller.signal.aborted) toast.error("加载习题集失败")
+      })
+    return () => controller.abort()
+  }, [tab, topicId, source, search])
+
+  const grouped = useMemo(() => {
+    const map = new Map<string, { topicName: string; questions: Question[] }>()
+    for (const q of questions) {
+      const key = q.topicId || "unknown"
+      if (!map.has(key)) map.set(key, { topicName: q.topicName || "综合", questions: [] })
+      map.get(key)!.questions.push(q)
+    }
+    return Array.from(map.entries())
+  }, [questions])
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-6">
+      <div className="flex items-center gap-3">
+        <button onClick={onBack} className="text-sm text-muted-foreground hover:text-foreground">← 返回</button>
+        <h1 className="text-2xl font-bold flex items-center gap-2"><BookMarked className="h-6 w-6 text-purple-500" />习题集</h1>
+      </div>
+
+      <div className="flex gap-2 rounded-lg bg-muted p-1 w-fit">
+        <Button size="sm" variant={tab === "all" ? "default" : "ghost"} onClick={() => setTab("all")} className={tab === "all" ? "bg-green-600 hover:bg-green-700" : ""}>全部题目</Button>
+        <Button size="sm" variant={tab === "mistakes" ? "default" : "ghost"} onClick={() => setTab("mistakes")} className={tab === "mistakes" ? "bg-green-600 hover:bg-green-700" : ""}>错题本</Button>
+      </div>
+
+      {tab === "mistakes" ? (
+        <div className="space-y-4">
+          <Button onClick={onStartMistakeReview} className="bg-amber-600 hover:bg-amber-700"><Target className="h-4 w-4 mr-2" />开始错题复习</Button>
+          <MistakeNotebook userId={userId} onRedoQuestion={onStartMistakeReview} />
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <Card>
+            <CardContent className="pt-4 flex gap-3 flex-wrap">
+              <div className="relative flex-1 min-w-[220px]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索题干..." className="pl-10" />
+              </div>
+              <Select value={topicId} onValueChange={setTopicId}>
+                <SelectTrigger className="w-40"><SelectValue placeholder="章节" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部章节</SelectItem>
+                  {chapters.filter(ch => ch.topicId).map(ch => <SelectItem key={ch.topicId!} value={ch.topicId!}>{ch.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={source} onValueChange={setSource}>
+                <SelectTrigger className="w-36"><SelectValue placeholder="题源" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部题源</SelectItem>
+                  <SelectItem value="bank">题库</SelectItem>
+                  <SelectItem value="ai">AI 生成</SelectItem>
+                </SelectContent>
+              </Select>
+            </CardContent>
+          </Card>
+
+          {grouped.length === 0 ? (
+            <Card><CardContent className="pt-6 text-center text-muted-foreground">暂无题目</CardContent></Card>
+          ) : grouped.map(([groupId, group]) => {
+            const groupOpen = !!expandedGroups[groupId]
+            return (
+              <Card key={groupId}>
+                <button className="w-full flex items-center justify-between p-4 text-left hover:bg-muted/50" onClick={() => setExpandedGroups(prev => ({ ...prev, [groupId]: !prev[groupId] }))}>
+                  <div>
+                    <h3 className="font-medium">{group.topicName}</h3>
+                    <p className="text-sm text-muted-foreground">{group.questions.length} 道题</p>
+                  </div>
+                  {groupOpen ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+                </button>
+                {groupOpen && (
+                  <CardContent className="border-t space-y-3 pt-4">
+                    {group.questions.map(q => {
+                      const open = !!expandedQuestions[q.id]
+                      return (
+                        <div key={q.id} className="rounded-lg border">
+                          <button className="w-full p-3 text-left flex items-start justify-between gap-3 hover:bg-muted/50" onClick={() => setExpandedQuestions(prev => ({ ...prev, [q.id]: !prev[q.id] }))}>
+                            <div className="space-y-1">
+                              <p className="text-sm font-medium">{q.content}</p>
+                              <div className="flex gap-1 flex-wrap">
+                                <Badge variant="secondary">{DIFFICULTY_LABELS[q.difficulty] || q.difficulty}</Badge>
+                                <Badge variant="outline">{q.isAiGenerated ? "AI 生成" : "题库"}</Badge>
+                              </div>
+                            </div>
+                            {open ? <ChevronUp className="h-4 w-4 mt-1" /> : <ChevronDown className="h-4 w-4 mt-1" />}
+                          </button>
+                          {open && (
+                            <div className="px-3 pb-3 space-y-2">
+                              {q.options.map(opt => (
+                                <div key={opt.label} className={`text-sm rounded-md border p-2 ${opt.label === q.correctAnswer ? "border-green-300 bg-green-50 dark:bg-green-950" : "bg-muted/30"}`}>
+                                  <span className="font-medium mr-2">{opt.label}.</span>{opt.text}
+                                </div>
+                              ))}
+                              <p className="text-sm"><span className="font-medium">正确答案：</span>{q.correctAnswer}</p>
+                              {q.explanation && <p className="text-sm text-muted-foreground"><span className="font-medium text-foreground">解析：</span>{q.explanation}</p>}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </CardContent>
+                )}
+              </Card>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DiagnosisResultView({
+  diagnosis,
+  userId,
+  onRetry,
+  similarQuestions,
+  pendingMistakeQuestionIds,
+  onClearMistakes,
+  onKeepMistakes,
+}: {
+  diagnosis: DiagnosisResult
+  userId: string
+  onRetry: () => void
+  similarQuestions: SimilarQuestion[]
+  pendingMistakeQuestionIds: string[]
+  onClearMistakes: () => void
+  onKeepMistakes: () => void
+}) {
   const [plan, setPlan] = useState<{ days: { date: string; tasks: { title: string; description: string; taskType: string }[] }[] } | null>(null)
   const [planLoading, setPlanLoading] = useState(false)
   const weakCategories = Array.isArray(diagnosis.weakCategories) ? diagnosis.weakCategories : []
@@ -443,26 +626,34 @@ function DiagnosisResultView({ diagnosis, userId, onRetry, similarQuestions }: {
     <div className="max-w-3xl mx-auto space-y-6">
       <h1 className="text-2xl font-bold">评测结果</h1>
 
-      {/* Category bar chart */}
+      {pendingMistakeQuestionIds.length > 0 && (
+        <Card className="border-amber-200 bg-amber-50/40 dark:bg-amber-950/10">
+          <CardHeader>
+            <CardTitle className="text-base">是否消除本次已答对的错题？</CardTitle>
+            <CardDescription>本次错题复习中有 {pendingMistakeQuestionIds.length} 道题已答对。确认后，这些题会从错题本中移除；答错的题会继续保留。</CardDescription>
+          </CardHeader>
+          <CardContent className="flex gap-2">
+            <Button onClick={onClearMistakes} className="bg-green-600 hover:bg-green-700">消除本次错题</Button>
+            <Button variant="outline" onClick={onKeepMistakes}>暂不消除</Button>
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader><CardTitle>中药类别掌握度</CardTitle></CardHeader>
         <CardContent className="space-y-4">
-          {weakCategories.length === 0 && (
-            <p className="text-sm text-muted-foreground">暂无可用的分类诊断数据。</p>
-          )}
+          {weakCategories.length === 0 && <p className="text-sm text-muted-foreground">暂无可用的分类诊断数据。</p>}
           {weakCategories.map(d => (
             <div key={d.category}>
               <div className="flex justify-between text-sm mb-1"><span>{d.category}</span><span>{Math.round((1 - d.errorRate) * 100)}%</span></div>
               <div className="h-4 bg-muted rounded-full overflow-hidden">
-                <div className={`h-full rounded-full transition-all duration-1000 ${d.errorRate > 0.4 ? "bg-red-500" : d.errorRate > 0.2 ? "bg-amber-500" : "bg-green-500"}`}
-                  style={{ width: `${(1 - d.errorRate) * 100}%` }} />
+                <div className={`h-full rounded-full transition-all duration-1000 ${d.errorRate > 0.4 ? "bg-red-500" : d.errorRate > 0.2 ? "bg-amber-500" : "bg-green-500"}`} style={{ width: `${(1 - d.errorRate) * 100}%` }} />
               </div>
             </div>
           ))}
         </CardContent>
       </Card>
 
-      {/* Assessment */}
       <Card>
         <CardHeader><CardTitle>AI 诊断</CardTitle></CardHeader>
         <CardContent>
@@ -481,14 +672,8 @@ function DiagnosisResultView({ diagnosis, userId, onRetry, similarQuestions }: {
         </CardContent>
       </Card>
 
-      {/* AI-generated similar herb questions */}
-      <SimilarQuestionPanel
-        questions={similarQuestions}
-        userId={userId}
-        onAddToPlan={handleAddToPlan}
-      />
+      <SimilarQuestionPanel questions={similarQuestions} userId={userId} onAddToPlan={handleAddToPlan} />
 
-      {/* Learning Plan */}
       {!plan && (
         <Button onClick={generatePlan} disabled={planLoading} size="lg" className="w-full bg-green-600 hover:bg-green-700">
           <Brain className="h-4 w-4 mr-2" />{planLoading ? "AI 正在生成学习计划..." : "AI 生成学习计划"}
@@ -497,34 +682,24 @@ function DiagnosisResultView({ diagnosis, userId, onRetry, similarQuestions }: {
 
       {plan && (
         <Card>
-          <CardHeader>
-            <CardTitle>AI 学习计划</CardTitle>
-            {diagnosis.overallAssessment && (
-              <CardDescription className="flex items-start gap-1.5 mt-1">
-                <Brain className="h-3.5 w-3.5 text-green-500 mt-0.5 flex-shrink-0" />
-                <span>{diagnosis.overallAssessment}</span>
-              </CardDescription>
-            )}
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {plan.days.slice(0, 7).map((day, i) => (
-                <div key={i} className="border rounded-lg p-4">
-                  <h4 className="font-medium mb-2">第 {i + 1} 天 · {day.date}</h4>
-                  <div className="space-y-2">
-                    {day.tasks.map((task, j) => (
-                      <div key={j} className="flex items-start gap-3 text-sm p-2 rounded bg-muted/50">
-                        <Badge variant="outline" className="mt-0.5 text-xs">{task.taskType === "study" ? "学习" : task.taskType === "practice" ? "练习" : task.taskType === "quiz" ? "测验" : "复习"}</Badge>
-                        <div>
-                          <p className="font-medium">{task.title}</p>
-                          <p className="text-muted-foreground">{task.description}</p>
-                        </div>
+          <CardHeader><CardTitle>AI 学习计划</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            {plan.days.slice(0, 7).map((day, i) => (
+              <div key={i} className="border rounded-lg p-4">
+                <h4 className="font-medium mb-2">第 {i + 1} 天 · {day.date}</h4>
+                <div className="space-y-2">
+                  {day.tasks.map((task, j) => (
+                    <div key={j} className="flex items-start gap-3 text-sm p-2 rounded bg-muted/50">
+                      <Badge variant="outline" className="mt-0.5 text-xs">{task.taskType}</Badge>
+                      <div>
+                        <p className="font-medium">{task.title}</p>
+                        <p className="text-muted-foreground">{task.description}</p>
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </div>
+            ))}
           </CardContent>
         </Card>
       )}

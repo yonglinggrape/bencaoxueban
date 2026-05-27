@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
   if (mode === "mistake" && userId) {
     // Find question IDs the user answered wrong
     const wrongRecords = await prisma.answerRecord.findMany({
-      where: { userId, isCorrect: false },
+      where: { userId, isCorrect: false, resolved: false },
       select: { questionId: true },
       distinct: ["questionId"],
     })

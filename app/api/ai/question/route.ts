@@ -9,7 +9,11 @@ export async function POST(req: Request) {
     const domain = await prisma.knowledgeDomain.findUnique({ where: { slug: "herbology" } })
     const domainId = domain?.id || "HERBOLOGY"
 
-    const context = herbName ? `中药: ${herbName}${topicName ? `, 章节: ${topicName}` : ""}` : undefined
+    const context = herbName
+      ? `中药: ${herbName}${topicName ? `, 章节: ${topicName}` : ""}`
+      : topicName
+        ? `章节: ${topicName}`
+        : undefined
     const questions = await generateQuestions(domainId, topicId || "general", count || 5, weakTopics || [], context)
 
     if (saveToDb) {
