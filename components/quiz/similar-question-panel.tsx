@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Label } from "@/components/ui/label"
-import { toast } from "sonner"
 import { Sparkles, CheckCircle, XCircle, BookOpen, Send } from "lucide-react"
 
 interface SimilarQuestion {
@@ -25,9 +24,7 @@ interface SimilarQuestionPanelProps {
   onAddToPlan: () => void
 }
 
-const DIFFICULTY_LABELS: Record<string, string> = { easy: "简单", medium: "中等", hard: "困难" }
-
-export function SimilarQuestionPanel({ questions, userId, onAddToPlan }: SimilarQuestionPanelProps) {
+export function SimilarQuestionPanel({ questions, onAddToPlan }: SimilarQuestionPanelProps) {
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [revealed, setRevealed] = useState<Record<string, boolean>>({})
   const [planAdded, setPlanAdded] = useState(false)
@@ -62,9 +59,8 @@ export function SimilarQuestionPanel({ questions, userId, onAddToPlan }: Similar
 
           return (
             <div key={q.id} className="border rounded-lg p-4">
-              <div className="flex items-center justify-between mb-3">
+              <div className="mb-3">
                 <h4 className="font-medium text-sm">{qi + 1}. {q.content}</h4>
-                <Badge variant="secondary" className="text-xs">{DIFFICULTY_LABELS[q.difficulty] || q.difficulty}</Badge>
               </div>
 
               <RadioGroup

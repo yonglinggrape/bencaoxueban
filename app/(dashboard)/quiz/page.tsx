@@ -53,7 +53,6 @@ type QuizMode = "chapter" | "random" | "mistake"
 type QuestionSource = "bank" | "ai"
 
 const DOMAIN_NAMES: Record<string, string> = { HERBOLOGY: "中药学" }
-const DIFFICULTY_LABELS: Record<string, string> = { easy: "简单", medium: "中等", hard: "困难" }
 
 function normalizeDiagnosis(data: Partial<DiagnosisResult> | null | undefined): DiagnosisResult {
   return {
@@ -275,6 +274,7 @@ export default function QuizPage() {
         <div className="grid gap-4">
           <ModeCard icon={BookOpen} title="章节练习" desc="按教材章节练习，可选择题库出题或 AI 智能出题。" color="bg-green-100 text-green-700" onClick={() => goToConfig("chapter")} />
           <ModeCard icon={Shuffle} title="随机练习" desc="从题库中随机抽题，全面检测各章节掌握情况。" color="bg-blue-100 text-blue-700" onClick={() => goToConfig("random")} />
+          <ModeCard icon={Target} title="错题复习" desc="从你之前答错且未消除的题目中抽取，完成后可选择是否消除本次已答对的错题。" color="bg-amber-100 text-amber-700" onClick={() => goToConfig("mistake")} />
           <ModeCard icon={BookMarked} title="习题集" desc="查看所有题目和错题本，题目默认收起，点击后展开详情。" color="bg-purple-100 text-purple-700" onClick={() => setPhase("questionBank")} />
         </div>
       </div>
@@ -358,7 +358,7 @@ export default function QuizPage() {
           <CardHeader>
             <CardTitle className="text-lg">{q.content}</CardTitle>
             <CardDescription>
-              {DOMAIN_NAMES[q.domainId] || q.domainId} · {DIFFICULTY_LABELS[q.difficulty] || q.difficulty}
+              {DOMAIN_NAMES[q.domainId] || q.domainId}
               {q.isAiGenerated && <Badge variant="outline" className="ml-2">AI</Badge>}
             </CardDescription>
           </CardHeader>
@@ -491,7 +491,7 @@ function QuestionBankView({ userId, chapters, onBack, onStartMistakeReview }: { 
       {tab === "mistakes" ? (
         <div className="space-y-4">
           <Button onClick={onStartMistakeReview} className="bg-amber-600 hover:bg-amber-700"><Target className="h-4 w-4 mr-2" />开始错题复习</Button>
-          <MistakeNotebook userId={userId} onRedoQuestion={onStartMistakeReview} />
+          <MistakeNotebook userId={userId} />
         </div>
       ) : (
         <div className="space-y-4">
@@ -539,12 +539,9 @@ function QuestionBankView({ userId, chapters, onBack, onStartMistakeReview }: { 
                       return (
                         <div key={q.id} className="rounded-lg border">
                           <button className="w-full p-3 text-left flex items-start justify-between gap-3 hover:bg-muted/50" onClick={() => setExpandedQuestions(prev => ({ ...prev, [q.id]: !prev[q.id] }))}>
-                            <div className="space-y-1">
+                            <div className="flex items-start gap-2 min-w-0">
+                              <Badge variant="outline" className="mt-0.5 flex-shrink-0">{q.isAiGenerated ? "AI 生成" : "题库"}</Badge>
                               <p className="text-sm font-medium">{q.content}</p>
-                              <div className="flex gap-1 flex-wrap">
-                                <Badge variant="secondary">{DIFFICULTY_LABELS[q.difficulty] || q.difficulty}</Badge>
-                                <Badge variant="outline">{q.isAiGenerated ? "AI 生成" : "题库"}</Badge>
-                              </div>
                             </div>
                             {open ? <ChevronUp className="h-4 w-4 mt-1" /> : <ChevronDown className="h-4 w-4 mt-1" />}
                           </button>

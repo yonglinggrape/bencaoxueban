@@ -1,13 +1,13 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { useState, useEffect } from "react"
+import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Label } from "@/components/ui/label"
 import { toast } from "sonner"
-import { BookOpen, ChevronDown, ChevronUp, CheckCircle, XCircle, Trash2, RefreshCw, Brain } from "lucide-react"
+import { BookOpen, ChevronDown, ChevronUp, CheckCircle, XCircle, Trash2, Brain } from "lucide-react"
 
 interface MistakeItem {
   id: string; questionId: string; content: string
@@ -21,10 +21,9 @@ interface MistakeGroup {
 
 interface MistakeNotebookProps {
   userId: string
-  onRedoQuestion: (questionId: string) => void
 }
 
-export function MistakeNotebook({ userId, onRedoQuestion }: MistakeNotebookProps) {
+export function MistakeNotebook({ userId }: MistakeNotebookProps) {
   const [groups, setGroups] = useState<MistakeGroup[]>([])
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
@@ -54,21 +53,28 @@ export function MistakeNotebook({ userId, onRedoQuestion }: MistakeNotebookProps
     }
   }
 
-  const fetchMistakes = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(`/api/mistakes?userId=${userId}`)
-      const data = await res.json()
-      setGroups(data.groups || [])
-      // Auto-expand first group
-      if (data.groups?.length > 0) {
-        setExpanded(prev => ({ ...prev, [data.groups[0].topicId]: true }))
-      }
-    } catch { toast.error("加载错题失败") }
-    finally { setLoading(false) }
-  }, [userId])
+  useEffect(() => {
+    if (!userId) return
+    let cancelled = false
 
-  useEffect(() => { if (userId) fetchMistakes() }, [userId, fetchMistakes])
+    fetch(`/api/mistakes?userId=${userId}`)
+      .then(res => res.json())
+      .then(data => {
+        if (cancelled) return
+        setGroups(data.groups || [])
+        if (data.groups?.length > 0) {
+          setExpanded(prev => ({ ...prev, [data.groups[0].topicId]: true }))
+        }
+      })
+      .catch(() => {
+        if (!cancelled) toast.error("加载错题失败")
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => { cancelled = true }
+  }, [userId])
 
   async function resolveMistakes(ids: string[]) {
     try {
@@ -153,35 +159,40 @@ export function MistakeNotebook({ userId, onRedoQuestion }: MistakeNotebookProps
                     <Badge variant="secondary" className="text-xs">{new Date(m.createdAt).toLocaleDateString("zh-CN")}</Badge>
                   </div>
 
-                  {/* Show the wrong answer highlight */}
-                  <div className="space-y-2">
-                    {m.options.map(opt => (
-                      <div key={opt.label} className={`flex items-center gap-2 text-sm p-2 rounded ${
-                        opt.label === m.userAnswer
-                          ? "bg-red-50 dark:bg-red-950 border border-red-300"
-                          : opt.label === m.correctAnswer
-                          ? "bg-green-50 dark:bg-green-950 border border-green-300"
-                          : "opacity-60"
-                      }`}>
-                        <span className="font-medium">{opt.label}.</span>
-                        <span>{opt.text}</span>
-                        {opt.label === m.userAnswer && <XCircle className="h-4 w-4 text-red-500 ml-auto" />}
-                        {opt.label === m.correctAnswer && opt.label !== m.userAnswer && <CheckCircle className="h-4 w-4 text-green-500 ml-auto" />}
-                      </div>
-                    ))}
-                  </div>
-
-                  {m.explanation && (
-                    <div className="p-3 rounded-md bg-muted/50 text-sm">
-                      <span className="font-medium">解析：</span>
-                      <span className="text-muted-foreground">{m.explanation}</span>
-                    </div>
-                  )}
-
-                  {/* Inline redo */}
                   {redoing[m.id]?.show ? (
-                    <div className={`p-3 rounded-md text-sm ${redoing[m.id].result === "correct" ? "bg-green-50 dark:bg-green-950" : "bg-red-50 dark:bg-red-950"}`}>
-                      <p className="font-medium">{redoing[m.id].result === "correct" ? "回答正确！" : "回答错误"}</p>
+                    <div className="space-y-3">
+                      <div className="space-y-2">
+                        {m.options.map(opt => (
+                          <div key={opt.label} className={`flex items-center gap-2 text-sm p-2 rounded border ${
+                            opt.label === m.correctAnswer
+                              ? "bg-green-50 dark:bg-green-950 border-green-300"
+                              : opt.label === redoing[m.id].answer
+                              ? "bg-red-50 dark:bg-red-950 border-red-300"
+                              : "border-border opacity-70"
+                          }`}>
+                            <span className="font-medium">{opt.label}.</span>
+                            <span>{opt.text}</span>
+                            {opt.label === redoing[m.id].answer && opt.label !== m.correctAnswer && <XCircle className="h-4 w-4 text-red-500 ml-auto" />}
+                            {opt.label === m.correctAnswer && <CheckCircle className="h-4 w-4 text-green-500 ml-auto" />}
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className={`p-3 rounded-md text-sm ${redoing[m.id].result === "correct" ? "bg-green-50 dark:bg-green-950" : "bg-red-50 dark:bg-red-950"}`}>
+                        <p className="font-medium">{redoing[m.id].result === "correct" ? "回答正确！" : "回答错误"}</p>
+                        <p className="text-muted-foreground mt-1">本次选择：{redoing[m.id].answer}；正确答案：{m.correctAnswer}</p>
+                        {m.userAnswer && m.userAnswer !== redoing[m.id].answer && (
+                          <p className="text-muted-foreground mt-1">上次错选：{m.userAnswer}</p>
+                        )}
+                      </div>
+
+                      {m.explanation && (
+                        <div className="p-3 rounded-md bg-muted/50 text-sm">
+                          <span className="font-medium">解析：</span>
+                          <span className="text-muted-foreground">{m.explanation}</span>
+                        </div>
+                      )}
+
                       <Button variant="ghost" size="sm" onClick={() => setRedoing(prev => ({ ...prev, [m.id]: { show: false, answer: "", result: null } }))}>重新回答</Button>
                     </div>
                   ) : (
@@ -201,9 +212,6 @@ export function MistakeNotebook({ userId, onRedoQuestion }: MistakeNotebookProps
                   )}
 
                   <div className="flex gap-2 pt-1">
-                    <Button size="sm" variant="outline" onClick={() => onRedoQuestion(m.questionId)}>
-                      <RefreshCw className="h-3 w-3 mr-1" />进入重做
-                    </Button>
                     <Button
                       size="sm"
                       variant="outline"
