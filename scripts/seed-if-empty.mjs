@@ -24,6 +24,7 @@ function runCommand(command, args) {
 function runSeed() {
   runCommand("npm", ["run", "seed"])
   runCommand("npx", ["tsx", "prisma/seed-mnemonics.ts"])
+  runCommand("npx", ["tsx", "prisma/seed-jiebiao-complete.ts"])
 }
 
 const dbPath = sqlitePathFromUrl(process.env.DATABASE_URL)
@@ -47,6 +48,9 @@ try {
           or properties is null
           or effects is null
           or usage is null
+          or properties like '待补全%'
+          or effects like '待补全%'
+          or usage like '待补全%'
       `)
       .get()
 
