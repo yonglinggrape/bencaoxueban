@@ -53,6 +53,30 @@ type QuizMode = "chapter" | "random" | "mistake"
 type QuestionSource = "bank" | "ai"
 
 const DOMAIN_NAMES: Record<string, string> = { HERBOLOGY: "中药学" }
+const QUIZ_STATE_KEY = "bencaoxueban-quiz-state"
+
+interface QuizStateSnapshot {
+  phase?: Phase
+  mode?: QuizMode
+  questionSource?: QuestionSource
+  selectedChapters?: string[]
+  questionCount?: number
+  questions?: Question[]
+  currentIdx?: number
+  answers?: Record<string, string>
+  diagnosis?: DiagnosisResult | null
+  similarQuestions?: SimilarQuestion[]
+  pendingMistakeQuestionIds?: string[]
+}
+
+function readQuizSnapshot(): QuizStateSnapshot {
+  if (typeof window === "undefined") return {}
+  try {
+    return JSON.parse(localStorage.getItem(QUIZ_STATE_KEY) || "{}") as QuizStateSnapshot
+  } catch {
+    return {}
+  }
+}
 
 function normalizeDiagnosis(data: Partial<DiagnosisResult> | null | undefined): DiagnosisResult {
   return {
@@ -83,10 +107,67 @@ export default function QuizPage() {
   const [diagnosis, setDiagnosis] = useState<DiagnosisResult | null>(null)
   const [similarQuestions, setSimilarQuestions] = useState<SimilarQuestion[]>([])
   const [pendingMistakeQuestionIds, setPendingMistakeQuestionIds] = useState<string[]>([])
+  const [hasLoadedSnapshot, setHasLoadedSnapshot] = useState(false)
 
   useEffect(() => {
     fetch("/api/collection/chapters").then(r => r.json()).then(d => setChapters(d.chapters || []))
   }, [])
+
+  useEffect(() => {
+    const restoreTimer = window.setTimeout(() => {
+      const snapshot = readQuizSnapshot()
+      if (snapshot.phase) setPhase(snapshot.phase)
+      if (snapshot.mode) setMode(snapshot.mode)
+      if (snapshot.questionSource) setQuestionSource(snapshot.questionSource)
+      if (snapshot.selectedChapters) setSelectedChapters(snapshot.selectedChapters)
+      if (snapshot.questionCount) setQuestionCount(snapshot.questionCount)
+      if (snapshot.questions) setQuestions(snapshot.questions)
+      if (typeof snapshot.currentIdx === "number") setCurrentIdx(snapshot.currentIdx)
+      if (snapshot.answers) setAnswers(snapshot.answers)
+      if (snapshot.diagnosis) setDiagnosis(snapshot.diagnosis)
+      if (snapshot.similarQuestions) setSimilarQuestions(snapshot.similarQuestions)
+      if (snapshot.pendingMistakeQuestionIds) setPendingMistakeQuestionIds(snapshot.pendingMistakeQuestionIds)
+      setHasLoadedSnapshot(true)
+    }, 0)
+
+    return () => window.clearTimeout(restoreTimer)
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !hasLoadedSnapshot) return
+    localStorage.setItem(QUIZ_STATE_KEY, JSON.stringify({
+      phase,
+      mode,
+      questionSource,
+      selectedChapters,
+      questionCount,
+      questions,
+      currentIdx,
+      answers,
+      diagnosis,
+      similarQuestions,
+      pendingMistakeQuestionIds,
+    }))
+  }, [hasLoadedSnapshot, phase, mode, questionSource, selectedChapters, questionCount, questions, currentIdx, answers, diagnosis, similarQuestions, pendingMistakeQuestionIds])
+
+  function refreshDiagnosisInBackground() {
+    if (!userId) return
+    fetch("/api/ai/diagnose", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId }),
+    })
+      .then(async res => normalizeDiagnosis(res.ok ? await res.json() : null))
+      .then(diagData => {
+        setDiagnosis(diagData)
+        return fetch("/api/diagnosis/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId, ...diagData }),
+        })
+      })
+      .catch(() => { /* background diagnosis is non-critical */ })
+  }
 
   function goToConfig(nextMode: QuizMode) {
     setMode(nextMode)
@@ -207,26 +288,12 @@ export default function QuizPage() {
         : []
       )
 
-      let diagData: DiagnosisResult
-      try {
-        const diagRes = await fetch("/api/ai/diagnose", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId }),
-        })
-        diagData = normalizeDiagnosis(diagRes.ok ? await diagRes.json() : null)
-      } catch {
-        diagData = normalizeDiagnosis(null)
-      }
-      setDiagnosis(diagData)
-
-      fetch("/api/diagnosis/save", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, ...diagData }),
-      }).catch(() => { /* non-critical */ })
-
+      setDiagnosis(normalizeDiagnosis({
+        overallAssessment: "测评结果已生成，AI 诊断正在后台更新。",
+        suggestions: ["稍后返回本页或学习计划页查看最新诊断。"],
+      }))
       setPhase("result")
+      refreshDiagnosisInBackground()
       toast.success(`评测完成！正确 ${correctCount}/${questions.length}`, { description: `获得 ${correctCount * 30} 经验` })
       if (leveledUp) toast.success("升级了！")
       for (const h of herbsCollected) toast("获得药卡", { description: `${h}`, icon: <Leaf className="h-4 w-4 text-green-500" /> })
@@ -257,6 +324,7 @@ export default function QuizPage() {
   }
 
   function resetQuiz() {
+    if (typeof window !== "undefined") localStorage.removeItem(QUIZ_STATE_KEY)
     setPhase("mode")
     setQuestions([])
     setAnswers({})

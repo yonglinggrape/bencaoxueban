@@ -1,5 +1,6 @@
 // DeepSeek (OpenAI-compatible)
-const DEEPSEEK_BASE = "https://api.deepseek.com/v1"
+const DEEPSEEK_BASE = process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com"
+const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || "deepseek-v4-flash"
 
 export function hasDeepSeekKey() {
   return !!process.env.DEEPSEEK_API_KEY
@@ -21,10 +22,11 @@ export async function deepseekChat(messages: DeepSeekMessage[], maxTokens = 2048
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: "deepseek-chat",
+      model: DEEPSEEK_MODEL,
       messages,
       max_tokens: maxTokens,
       temperature: 0.7,
+      thinking: { type: "disabled" },
     }),
   })
 

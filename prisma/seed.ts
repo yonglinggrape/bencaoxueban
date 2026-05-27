@@ -140,9 +140,16 @@ async function main() {
   ]
 
   for (const q of questions) {
+    const topicId = topics[q.top] || topics["解表药"]
+    const existing = await prisma.question.findFirst({
+      where: { content: q.c, topicId },
+      select: { id: true },
+    })
+    if (existing) continue
+
     await prisma.question.create({
       data: {
-        content: q.c, domainId: herbology.id, topicId: topics[q.top] || topics["解表药"],
+        content: q.c, domainId: herbology.id, topicId,
         questionType: "single_choice",
         options: JSON.stringify(q.o.map((x: { l: string; t: string }) => ({ label: x.l, text: x.t }))),
         correctAnswer: q.a, explanation: q.e, difficulty: q.d,
@@ -206,7 +213,7 @@ async function main() {
         }
         await prisma.herbCard.upsert({
           where: { name: herbName },
-          update: { topicId, masteryLevel: level },
+          update: data as never,
           create: data as never,
         })
       }

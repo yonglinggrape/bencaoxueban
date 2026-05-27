@@ -10,8 +10,8 @@ function sqlitePathFromUrl(url) {
   return path.isAbsolute(rawPath) ? rawPath : path.resolve(process.cwd(), rawPath)
 }
 
-function runSeed() {
-  const result = spawnSync("npm", ["run", "seed"], {
+function runCommand(command, args) {
+  const result = spawnSync(command, args, {
     stdio: "inherit",
     shell: process.platform === "win32",
   })
@@ -19,6 +19,11 @@ function runSeed() {
   if (result.status !== 0) {
     process.exit(result.status || 1)
   }
+}
+
+function runSeed() {
+  runCommand("npm", ["run", "seed"])
+  runCommand("npx", ["tsx", "prisma/seed-mnemonics.ts"])
 }
 
 const dbPath = sqlitePathFromUrl(process.env.DATABASE_URL)
@@ -34,11 +39,22 @@ try {
     runSeed()
   } else {
     const { count } = db.prepare("select count(*) as count from HerbCard").get()
-    if (count > 0) {
-      console.log(`[startup] Existing herb data found (${count} rows); skipping seed.`)
-    } else {
-      console.log("[startup] HerbCard is empty; running seed.")
+    const { incomplete } = db
+      .prepare(`
+        select count(*) as incomplete
+        from HerbCard
+        where latinName is null
+          or properties is null
+          or effects is null
+          or usage is null
+      `)
+      .get()
+
+    if (count < 400 || incomplete > 0) {
+      console.log(`[startup] Herb data incomplete (${count} rows, ${incomplete} incomplete); running seed.`)
       runSeed()
+    } else {
+      console.log(`[startup] Existing herb data found (${count} rows); skipping seed.`)
     }
   }
 } finally {

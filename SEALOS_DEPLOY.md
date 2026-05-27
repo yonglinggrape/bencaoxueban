@@ -22,7 +22,7 @@ DEEPSEEK_API_KEY=<your-deepseek-key>
 Optional:
 
 ```env
-ANTHROPIC_API_KEY=<your-anthropic-key>
+DEEPSEEK_MODEL=deepseek-v4-flash
 ```
 
 ## Database Import
@@ -34,7 +34,7 @@ To make Sealos match local functionality and local seed data, import the local S
 3. Upload local `dev.db` from the project root to `/app/data/dev.db`.
 4. Start or redeploy the app.
 
-The startup script runs `prisma db push` and only seeds when `HerbCard` is empty, so an imported database will not be overwritten.
+The startup script runs `prisma db push` and seeds when the herb catalog is empty or incomplete, so deployed services receive the full 本草药典 card and detail data automatically.
 The seed scripts read `DATABASE_URL`, so startup schema sync and startup seed target the same SQLite file.
 
 Expected local baseline:
