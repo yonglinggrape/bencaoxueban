@@ -7,13 +7,17 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
+import { Textarea } from "@/components/ui/textarea"
 import { toast } from "sonner"
-import { BookOpen, Brain, Calendar, CheckCircle2, Circle, ArrowRight, Sparkles, AlertTriangle, ChevronDown, ChevronUp, RefreshCw } from "lucide-react"
+import { BookOpen, Brain, Calendar, CheckCircle2, Circle, ArrowRight, Sparkles, AlertTriangle, ChevronDown, ChevronUp, RefreshCw, MessageCircle, Send, Loader2, Check, X } from "lucide-react"
 
 interface PlanTask { id: string; title: string; description: string; domainId: string; topicId: string; taskType: string; duration: number; completed: boolean }
 interface PlanDay { date: string; tasks: PlanTask[] }
 interface LearningPlan { id: string; userId: string; weekStart: string; weekEnd: string; days: PlanDay[]; isActive: boolean }
 interface SavedDiagnosis { weakCategories: { category: string; errorRate: number; totalQuestions: number }[]; weakTopics: { topicId: string; topicName: string; errorRate: number }[]; overallAssessment: string; suggestions: string[]; createdAt: string }
+interface PlanOperation { action: "create" | "update" | "delete" | "replace_plan"; taskId?: string; title?: string; description?: string; taskType?: string; scheduledDate?: string; isCompleted?: boolean; reason?: string }
+interface PlanProposal { reply: string; operations: PlanOperation[] }
+interface PlanChatMessage { role: "user" | "assistant"; content: string; proposal?: PlanProposal }
 
 export default function LearningPage() {
   const { data: session } = useSession()
@@ -25,6 +29,11 @@ export default function LearningPage() {
   const [savedDiagnosis, setSavedDiagnosis] = useState<SavedDiagnosis | null>(null)
   const [todayExpanded, setTodayExpanded] = useState(false)
   const [refreshingDiagnosis, setRefreshingDiagnosis] = useState(false)
+  const [planChatSessionId, setPlanChatSessionId] = useState("")
+  const [planChatMessages, setPlanChatMessages] = useState<PlanChatMessage[]>([])
+  const [planChatInput, setPlanChatInput] = useState("")
+  const [planChatLoading, setPlanChatLoading] = useState(false)
+  const [applyingProposal, setApplyingProposal] = useState(false)
 
   async function refreshDiagnosis() {
     setRefreshingDiagnosis(true)
@@ -47,25 +56,28 @@ export default function LearningPage() {
   }
 
   useEffect(() => {
-    fetchPlan()
-    fetchDiagnosis()
-  }, [])
+    if (!userId) return
+    let cancelled = false
 
-  async function fetchPlan() {
-    setLoading(true)
-    try {
-      const res = await fetch(`/api/ai/plan?userId=${userId}`)
-      if (res.ok) setPlan(await res.json())
-    } catch { /* no plan yet */ }
-    finally { setLoading(false) }
-  }
+    fetch(`/api/ai/plan?userId=${userId}`)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (!cancelled && data) setPlan(data)
+      })
+      .catch(() => { /* no plan yet */ })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
 
-  async function fetchDiagnosis() {
-    try {
-      const res = await fetch(`/api/diagnosis/save?userId=${userId}`)
-      if (res.ok) setSavedDiagnosis(await res.json())
-    } catch { /* no diagnosis yet */ }
-  }
+    fetch(`/api/diagnosis/save?userId=${userId}`)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (!cancelled && data) setSavedDiagnosis(data)
+      })
+      .catch(() => { /* no diagnosis yet */ })
+
+    return () => { cancelled = true }
+  }, [userId])
 
   async function generatePlan() {
     setGenerating(true)
@@ -76,6 +88,49 @@ export default function LearningPage() {
       toast.success("AI 学习计划已生成！")
     } catch (e) { toast.error(e instanceof Error ? e.message : "生成失败") }
     finally { setGenerating(false) }
+  }
+
+  async function sendPlanChatMessage() {
+    const message = planChatInput.trim()
+    if (!message || planChatLoading) return
+    setPlanChatInput("")
+    setPlanChatMessages(prev => [...prev, { role: "user", content: message }])
+    setPlanChatLoading(true)
+    try {
+      const res = await fetch("/api/plan/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, message, sessionId: planChatSessionId || undefined }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "生成计划草案失败")
+      setPlanChatSessionId(data.sessionId || "")
+      setPlanChatMessages(prev => [...prev, { role: "assistant", content: data.reply, proposal: data.proposal }])
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "生成计划草案失败")
+    } finally {
+      setPlanChatLoading(false)
+    }
+  }
+
+  async function applyPlanProposal(proposal: PlanProposal) {
+    setApplyingProposal(true)
+    try {
+      const res = await fetch("/api/plan/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, operations: proposal.operations }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "应用计划草案失败")
+      setPlan(data.plan)
+      setPlanChatMessages(prev => prev.map(m => m.proposal === proposal ? { ...m, proposal: undefined } : m))
+      toast.success("学习计划已更新")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "应用计划草案失败")
+    } finally {
+      setApplyingProposal(false)
+    }
   }
 
   const today = new Date().toISOString().split("T")[0]
@@ -93,7 +148,7 @@ export default function LearningPage() {
           <CardContent>
             <BookOpen className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
             <h2 className="text-lg font-semibold mb-2">还没有学习计划</h2>
-            <p className="text-muted-foreground mb-6">先去"智能练习"完成初始评测，AI 将为你生成个性化学习计划。</p>
+            <p className="text-muted-foreground mb-6">先去「智能练习」完成初始评测，AI 将为你生成个性化学习计划。</p>
             <div className="flex gap-4 justify-center">
               <Button className="bg-amber-600 hover:bg-amber-700" onClick={() => router.push("/quiz")}>去答题评测</Button>
               <Button onClick={generatePlan} disabled={generating} variant="outline"><Brain className="h-4 w-4 mr-2" />{generating ? "生成中..." : "直接生成计划"}</Button>
@@ -103,6 +158,18 @@ export default function LearningPage() {
 
         {/* Weak Points from saved diagnosis */}
         {savedDiagnosis && <WeakPointsCard diagnosis={savedDiagnosis} onRefresh={refreshDiagnosis} refreshing={refreshingDiagnosis} />}
+
+        <PlanAssistantCard
+          messages={planChatMessages}
+          input={planChatInput}
+          loading={planChatLoading}
+          applying={applyingProposal}
+          onInputChange={setPlanChatInput}
+          onSend={sendPlanChatMessage}
+          onApply={applyPlanProposal}
+          onDismissProposal={(proposal) => setPlanChatMessages(prev => prev.map(m => m.proposal === proposal ? { ...m, proposal: undefined } : m))}
+          hasPlan={false}
+        />
 
       </div>
     )
@@ -194,6 +261,137 @@ export default function LearningPage() {
       {/* Weak Points */}
       {savedDiagnosis && <WeakPointsCard diagnosis={savedDiagnosis} onRefresh={refreshDiagnosis} refreshing={refreshingDiagnosis} />}
 
+      <PlanAssistantCard
+        messages={planChatMessages}
+        input={planChatInput}
+        loading={planChatLoading}
+        applying={applyingProposal}
+        onInputChange={setPlanChatInput}
+        onSend={sendPlanChatMessage}
+        onApply={applyPlanProposal}
+        onDismissProposal={(proposal) => setPlanChatMessages(prev => prev.map(m => m.proposal === proposal ? { ...m, proposal: undefined } : m))}
+        hasPlan={true}
+      />
+
+    </div>
+  )
+}
+
+function PlanAssistantCard({
+  messages,
+  input,
+  loading,
+  applying,
+  onInputChange,
+  onSend,
+  onApply,
+  onDismissProposal,
+  hasPlan,
+}: {
+  messages: PlanChatMessage[]
+  input: string
+  loading: boolean
+  applying: boolean
+  onInputChange: (value: string) => void
+  onSend: () => void
+  onApply: (proposal: PlanProposal) => void
+  onDismissProposal: (proposal: PlanProposal) => void
+  hasPlan: boolean
+}) {
+  return (
+    <Card className="border-green-200 dark:border-green-800">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <MessageCircle className="h-5 w-5 text-green-500" />
+          计划助手
+        </CardTitle>
+        <CardDescription>
+          {hasPlan ? "告诉 AI 你想怎样调整学习安排，确认草案后再更新计划。" : "还没有计划时，也可以先聊天生成一份可确认的计划草案。"}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+          {messages.length === 0 ? (
+            <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+              例如：明天任务少一点；把清热药复习提前到今天；本周多安排错题复习。
+            </div>
+          ) : messages.map((message, index) => (
+            <div key={index} className={`space-y-2 ${message.role === "user" ? "text-right" : "text-left"}`}>
+              <div className={`inline-block max-w-[85%] rounded-lg px-3 py-2 text-sm ${message.role === "user" ? "bg-green-100 dark:bg-green-900" : "bg-muted"}`}>
+                <p className="whitespace-pre-wrap text-left">{message.content}</p>
+              </div>
+              {message.proposal && (
+                <PlanProposalPreview
+                  proposal={message.proposal}
+                  applying={applying}
+                  onApply={() => onApply(message.proposal!)}
+                  onDismiss={() => onDismissProposal(message.proposal!)}
+                />
+              )}
+            </div>
+          ))}
+          {loading && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin text-green-500" />
+              正在整理计划草案...
+            </div>
+          )}
+        </div>
+
+        <div className="flex gap-2">
+          <Textarea
+            value={input}
+            onChange={e => onInputChange(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSend() } }}
+            placeholder="输入你想调整的学习计划..."
+            className="min-h-[44px] max-h-[120px] resize-none text-sm"
+            rows={1}
+          />
+          <Button onClick={onSend} disabled={loading || !input.trim()} size="icon" className="bg-green-600 hover:bg-green-700 flex-shrink-0">
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function PlanProposalPreview({ proposal, applying, onApply, onDismiss }: { proposal: PlanProposal; applying: boolean; onApply: () => void; onDismiss: () => void }) {
+  const actionLabel: Record<PlanOperation["action"], string> = {
+    create: "新增",
+    update: "修改",
+    delete: "删除",
+    replace_plan: "重建",
+  }
+
+  return (
+    <div className="rounded-lg border bg-background p-3 text-left space-y-3">
+      <div className="text-sm font-medium">计划调整草案</div>
+      <div className="space-y-2">
+        {proposal.operations.map((op, i) => (
+          <div key={i} className="rounded-md bg-muted/50 p-2 text-sm">
+            <div className="flex items-center gap-2">
+              <Badge variant={op.action === "delete" ? "destructive" : "secondary"}>{actionLabel[op.action] || op.action}</Badge>
+              <span className="font-medium">{op.title || op.taskId || "整周计划"}</span>
+            </div>
+            <div className="text-muted-foreground mt-1">
+              {op.scheduledDate && <span>{op.scheduledDate} · </span>}
+              {op.taskType && <span>{op.taskType} · </span>}
+              {op.reason || op.description}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <Button size="sm" onClick={onApply} disabled={applying} className="bg-green-600 hover:bg-green-700">
+          {applying ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Check className="h-3.5 w-3.5 mr-1" />}
+          应用到学习计划
+        </Button>
+        <Button size="sm" variant="outline" onClick={onDismiss} disabled={applying}>
+          <X className="h-3.5 w-3.5 mr-1" />
+          取消
+        </Button>
+      </div>
     </div>
   )
 }
